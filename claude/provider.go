@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -143,8 +144,13 @@ type thinkingWire struct {
 }
 
 func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) ([]byte, error) {
+	messages := params.Messages
+	if p.opts.forceStringSystem {
+		messages = stripThinkingBlocks(messages)
+	}
+
 	r := apiRequest{
-		Model: params.Model, Messages: params.Messages,
+		Model: params.Model, Messages: messages,
 		MaxTokens: params.MaxTokens,
 		Stream: stream, Tools: params.Tools,
 		Temperature: params.Temperature, TopP: params.TopP, TopK: params.TopK,
@@ -185,7 +191,11 @@ func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) (
 			BudgetTokens: params.Thinking.BudgetTokens,
 		}
 	}
-	return json.Marshal(r)
+	data, err := json.Marshal(r)
+	if os.Getenv("AGENT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] request body (%d bytes): %s\n", len(data), truncateDebug(data, 2000))
+	}
+	return data, err
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +210,32 @@ func isRetryable(err error) bool {
 		return apiErr.IsRetryable()
 	}
 	return true
+}
+
+// stripThinkingBlocks removes thinking content blocks from all messages.
+// Third-party proxies (DashScope, etc.) reject the "thinking" block type.
+func stripThinkingBlocks(msgs []agentsdk.Message) []agentsdk.Message {
+	out := make([]agentsdk.Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = agentsdk.Message{Role: m.Role}
+		for _, b := range m.Content {
+			if b.Type == "thinking" {
+				continue
+			}
+			out[i].Content = append(out[i].Content, b)
+		}
+		if len(out[i].Content) == 0 {
+			out[i].Content = []agentsdk.ContentBlock{agentsdk.NewTextBlock("")}
+		}
+	}
+	return out
+}
+
+func truncateDebug(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "...(truncated)"
 }
 
 func sleepWithContext(ctx context.Context, attempt int) {

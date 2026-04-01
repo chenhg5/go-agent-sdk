@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 )
 
 // APIError represents a structured error response from the Claude Messages API.
@@ -42,6 +43,10 @@ func parseErrorResponse(resp *http.Response) *APIError {
 	apiErr := &APIError{
 		StatusCode: resp.StatusCode,
 		RawBody:    string(body),
+	}
+
+	if os.Getenv("AGENT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] error response %d: %s\n", resp.StatusCode, string(body))
 	}
 
 	var envelope struct {
