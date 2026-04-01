@@ -1,6 +1,8 @@
 # go-agent-sdk
 
-可组合的 Go SDK，用于构建 LLM 驱动的 Agent。参考 Claude Code 架构设计，适合嵌入任何 Go 项目。
+可组合的 Go SDK，用于构建 LLM 驱动的 Agent。参考 [Claude Code](https://github.com/anthropics/claude-code) 架构设计，适合嵌入任何 Go 项目。
+
+[**English Documentation**](README.md)
 
 ## 特性
 
@@ -171,7 +173,7 @@ agentsdk.WithPermissionHandler(agentsdk.WithToolCheckerAndPrompter(registry, pro
 ```go
 import "github.com/chenhg5/go-agent-sdk/mcp"
 
-client, _ := mcp.NewStdioClient("npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp")
+client, _ := mcp.NewStdioClient(ctx, "npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp")
 defer client.Close()
 
 mcpTools, _ := mcp.ToolsFromClient(client)
@@ -300,12 +302,29 @@ agent.Run(ctx, "开始新对话")
 └──────────────────────────────────────────────┘
 ```
 
+## 示例
+
+参见 [`examples/`](examples/) 目录：
+
+- **[basic](examples/basic/)** — 基础对话
+- **[tools](examples/tools/)** — 天气+时间工具，流式输出
+- **[streaming](examples/streaming/)** — 实时事件处理
+
+```bash
+export ANTHROPIC_AUTH_TOKEN=sk-...
+go run ./examples/basic
+go run ./examples/tools
+go run ./examples/streaming
+```
+
 ## 开发路线
 
 - [x] Phase 1: 核心 SDK — Agent 循环、Provider、Tool、流式响应
 - [x] Phase 2: 内置工具 — Bash、文件读写、Glob、Grep
 - [x] Phase 3: 高级功能 — 权限控制、钩子、费用追踪、会话持久化、上下文压缩
 - [x] Phase 4: 生态扩展 — MCP Client、子 Agent、交互式权限
+- [ ] 更多 Provider: OpenAI、Bedrock、Vertex
+- [ ] Coordinator Mode: 多 Agent 编排
 
 ## 开发
 
