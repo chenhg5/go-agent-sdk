@@ -56,11 +56,15 @@ func (s *fakeStream) Recv() (agentsdk.StreamEvent, error) {
 
 func (s *fakeStream) Close() error { return nil }
 
-func testFactory(_ context.Context, _ NewSessionParams) (agentsdk.Agent, error) {
-	a, _ := agentsdk.New(
+func testFactory(_ context.Context, _ NewSessionParams, perm agentsdk.PermissionHandler) (agentsdk.Agent, error) {
+	opts := []agentsdk.Option{
 		agentsdk.WithProvider(fakeProvider{}),
 		agentsdk.WithSystemPrompt("You are a test agent."),
-	)
+	}
+	if perm != nil {
+		opts = append(opts, agentsdk.WithPermissionHandler(perm))
+	}
+	a, _ := agentsdk.New(opts...)
 	return a, nil
 }
 

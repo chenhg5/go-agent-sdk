@@ -12,10 +12,16 @@ import (
 	agentsdk "github.com/chenhg5/go-agent-sdk"
 )
 
-// AgentFactory creates a new Agent for a session, given the session parameters.
-// The CWD and MCP server list are passed so the factory can configure tools,
-// providers, and prompts accordingly.
-type AgentFactory func(ctx context.Context, params NewSessionParams) (agentsdk.Agent, error)
+// AgentFactory creates a new Agent for a session.
+//
+// Parameters:
+//   - ctx: background context
+//   - params: session creation parameters (CWD, MCP servers, etc.)
+//   - perm: a pre-built PermissionHandler that delegates to the ACP client
+//     via session/request_permission. The factory SHOULD pass it to
+//     agentsdk.WithPermissionHandler so that tool-permission requests are
+//     forwarded to the connected editor.
+type AgentFactory func(ctx context.Context, params NewSessionParams, perm agentsdk.PermissionHandler) (agentsdk.Agent, error)
 
 // ServerConfig configures the ACP server.
 type ServerConfig struct {
@@ -134,13 +140,16 @@ func (s *Server) handleNewSession(msg *jsonrpcMessage) {
 		return
 	}
 
-	agent, err := s.cfg.AgentFactory(context.Background(), params)
+	sessionID := generateID()
+	permHandler := s.MakePermissionHandler(sessionID)
+
+	agent, err := s.cfg.AgentFactory(context.Background(), params, permHandler)
 	if err != nil {
 		s.tp.SendError(msg.ID, errCodeInternal, "failed to create agent: "+err.Error())
 		return
 	}
 
-	sess := s.sessions.Create(params.CWD, agent)
+	sess := s.sessions.CreateWithID(sessionID, params.CWD, agent)
 	s.logger.Printf("session/new: id=%s cwd=%s", sess.ID, params.CWD)
 
 	s.tp.SendResult(msg.ID, NewSessionResult{SessionID: sess.ID})

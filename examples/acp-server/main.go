@@ -1,13 +1,21 @@
-// acp-server launches an ACP-compatible agent over stdio.
+// acp-server launches an ACP-compatible coding agent over stdio.
 //
-// Any ACP client (Cursor, VS Code, etc.) can connect to this process:
+// This agent mirrors Claude Code's capabilities:
+//   - Claude Code system prompt (identity, rules, tool-usage, tone)
+//   - All built-in tools: Bash, FileRead, FileEdit, FileWrite, Glob, Grep
+//   - Dynamic context injection: Git status, date, environment, CLAUDE.md
+//   - Permission handling via ACP session/request_permission
+//
+// Usage:
 //
 //	export ANTHROPIC_AUTH_TOKEN=sk-...
 //	export ANTHROPIC_BASE_URL=https://api.anthropic.com  # optional
 //	export ANTHROPIC_MODEL=claude-sonnet-4-20250514       # optional
 //	go run ./examples/acp-server
 //
-// The client communicates via newline-delimited JSON-RPC 2.0 on stdin/stdout.
+// Or build a binary for cc-connect:
+//
+//	go build -o acp-agent ./examples/acp-server
 package main
 
 import (
@@ -19,6 +27,7 @@ import (
 	agentsdk "github.com/chenhg5/go-agent-sdk"
 	"github.com/chenhg5/go-agent-sdk/acp"
 	"github.com/chenhg5/go-agent-sdk/claude"
+	"github.com/chenhg5/go-agent-sdk/tools"
 )
 
 func main() {
@@ -27,8 +36,8 @@ func main() {
 	srv := acp.NewServer(acp.ServerConfig{
 		AgentFactory: createAgent,
 		Info: &acp.ImplementationInfo{
-			Name:    "go-agent-sdk-acp",
-			Title:   "Go Agent SDK (ACP)",
+			Name:    "go-agent-sdk",
+			Title:   "Go Agent SDK",
 			Version: "0.6.0",
 		},
 		Capabilities: &acp.AgentCapabilities{
@@ -46,7 +55,7 @@ func main() {
 	}
 }
 
-func createAgent(_ context.Context, params acp.NewSessionParams) (agentsdk.Agent, error) {
+func createAgent(_ context.Context, params acp.NewSessionParams, perm agentsdk.PermissionHandler) (agentsdk.Agent, error) {
 	apiKey := os.Getenv("ANTHROPIC_AUTH_TOKEN")
 	if apiKey == "" {
 		return nil, fmt.Errorf("ANTHROPIC_AUTH_TOKEN is not set")
@@ -62,17 +71,34 @@ func createAgent(_ context.Context, params acp.NewSessionParams) (agentsdk.Agent
 		model = agentsdk.DefaultModel
 	}
 
+	cwd := params.CWD
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+
 	opts := []agentsdk.Option{
 		agentsdk.WithProvider(claude.NewProvider(apiKey, providerOpts...)),
 		agentsdk.WithModel(model),
 		agentsdk.WithMaxTokens(16384),
+
+		// Claude Code system prompt preset
 		agentsdk.WithClaudeCodePreset(),
+
+		// All built-in tools (Bash, FileRead, FileEdit, FileWrite, Glob, Grep)
+		agentsdk.WithTools(tools.DefaultTools()...),
+
+		// Dynamic context providers (injected into first user message)
+		agentsdk.WithContextProviders(
+			agentsdk.DateContext{},
+			agentsdk.EnvContext{Model: model, WorkDir: cwd},
+			agentsdk.GitContext{WorkDir: cwd},
+			agentsdk.CLAUDEMDContext{WorkDir: cwd, IncludeUser: true},
+		),
 	}
 
-	if params.CWD != "" {
-		opts = append(opts, agentsdk.WithContextProviders(
-			agentsdk.StaticContext{Key: "working_directory", Text: "CWD: " + params.CWD},
-		))
+	// ACP permission handler — delegates to the editor via session/request_permission
+	if perm != nil {
+		opts = append(opts, agentsdk.WithPermissionHandler(perm))
 	}
 
 	return agentsdk.New(opts...)

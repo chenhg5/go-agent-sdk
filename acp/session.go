@@ -30,8 +30,12 @@ func NewSessionManager() *SessionManager {
 }
 
 func (m *SessionManager) Create(cwd string, agent agentsdk.Agent) *Session {
+	return m.CreateWithID(generateID(), cwd, agent)
+}
+
+func (m *SessionManager) CreateWithID(id, cwd string, agent agentsdk.Agent) *Session {
 	s := &Session{
-		ID:    generateID(),
+		ID:    id,
 		CWD:   cwd,
 		Agent: agent,
 	}
