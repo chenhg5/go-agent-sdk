@@ -16,6 +16,7 @@
 - **MCP 支持** — 通过 Model Context Protocol 动态发现和调用外部工具
 - **子 Agent** — 支持任务委派给子 Agent 并收集结果
 - **Prompt 工程** — 结构化 Prompt 组装、缓存分界线、预设模板、动态上下文注入，对齐 Claude Code 架构
+- **ACP 协议** — 内置 [Agent Client Protocol](https://agentclientprotocol.com) 服务器，任何兼容编辑器（Cursor、VS Code 等）可通过 stdio JSON-RPC 接入
 
 ## 安装
 
@@ -327,6 +328,36 @@ agent, _ := agentsdk.New(
 | `StaticContext` | 自定义固定文本 |
 | `ContextProviderFunc` | 函数适配器（一次性 Provider） |
 
+## ACP 协议服务器
+
+将 Agent 暴露为标准的 [Agent Client Protocol](https://agentclientprotocol.com) 服务器，任何 ACP 兼容编辑器（Cursor、VS Code 等）都可以通过 stdio 连接：
+
+```go
+import "github.com/chenhg5/go-agent-sdk/acp"
+
+srv := acp.NewServer(acp.ServerConfig{
+    AgentFactory: func(ctx context.Context, params acp.NewSessionParams) (agentsdk.Agent, error) {
+        return agentsdk.New(
+            agentsdk.WithProvider(provider),
+            agentsdk.WithClaudeCodePreset(),
+            agentsdk.WithTools(tools.DefaultTools()...),
+        )
+    },
+    Info: &acp.ImplementationInfo{
+        Name: "my-agent", Title: "My Agent", Version: "1.0.0",
+    },
+})
+
+srv.Run() // 阻塞在 stdin/stdout，编辑器作为子进程启动
+```
+
+支持的 ACP 方法：
+- `initialize` — 版本与能力协商
+- `session/new` — 创建新 Agent 会话
+- `session/prompt` — 发送用户消息，流式推送 `session/update` 通知
+- `session/cancel` — 取消正在进行的 prompt 轮次
+- `session/request_permission` — 反向调用客户端请求工具权限
+
 ## 多轮对话
 
 ```go
@@ -381,6 +412,9 @@ agent.Run(ctx, "开始新对话")
 │   MCP Client        │   SubAgentTool         │  Phase 4
 │   └→ 动态工具发现    │   └→ 任务委派           │
 ├─────────────────────┴────────────────────────┤
+│         ACP Server (acp/)                    │  协议层
+│   └→ stdio JSON-RPC → 编辑器集成             │  (Phase 6)
+├──────────────────────────────────────────────┤
 │          Message / ContentBlock / Usage      │  类型定义
 └──────────────────────────────────────────────┘
 ```
@@ -392,6 +426,7 @@ agent.Run(ctx, "开始新对话")
 - **[basic](examples/basic/)** — 基础对话
 - **[tools](examples/tools/)** — 天气+时间工具，流式输出
 - **[streaming](examples/streaming/)** — 实时事件处理
+- **[acp-server](examples/acp-server/)** — ACP 协议服务器（stdio）
 
 ```bash
 export ANTHROPIC_AUTH_TOKEN=sk-...
@@ -407,6 +442,7 @@ go run ./examples/streaming
 - [x] Phase 3: 高级功能 — 权限控制、钩子、费用追踪、会话持久化、上下文压缩
 - [x] Phase 4: 生态扩展 — MCP Client、子 Agent、交互式权限
 - [x] Phase 5: Prompt 工程 — PromptBuilder、缓存分界线、预设模板、ContextProviders
+- [x] Phase 6: ACP 协议 — Agent Client Protocol 服务器（stdio JSON-RPC、会话管理、流式推送）
 - [ ] 更多 Provider: OpenAI、Bedrock、Vertex
 - [ ] Coordinator Mode: 多 Agent 编排
 

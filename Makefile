@@ -42,6 +42,9 @@ example-tools:
 example-streaming:
 	go run ./examples/streaming
 
+example-acp:
+	go run ./examples/acp-server
+
 examples: example-basic example-streaming
 
 # Clean build cache

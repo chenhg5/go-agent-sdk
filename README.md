@@ -15,6 +15,7 @@ A composable Go SDK for building LLM-powered agents. Inspired by the architectur
 - **Permission control** — sync/async interactive approval; agent loop pauses until user decides
 - **MCP support** — dynamically discover and call external tools via Model Context Protocol
 - **Sub-agents** — delegate tasks to child agents and collect results
+- **ACP protocol** — expose the agent as a standard [Agent Client Protocol](https://agentclientprotocol.com) server (stdio JSON-RPC)
 
 ## Install
 
@@ -342,6 +343,41 @@ Built-in providers:
 | `StaticContext` | Fixed custom text |
 | `ContextProviderFunc` | Function adapter for one-off providers |
 
+## ACP Protocol Server
+
+Expose your agent as an [Agent Client Protocol](https://agentclientprotocol.com) server, enabling any ACP-compatible editor (Cursor, VS Code, etc.) to connect:
+
+```go
+import "github.com/chenhg5/go-agent-sdk/acp"
+
+srv := acp.NewServer(acp.ServerConfig{
+    AgentFactory: func(ctx context.Context, params acp.NewSessionParams) (agentsdk.Agent, error) {
+        return agentsdk.New(
+            agentsdk.WithProvider(provider),
+            agentsdk.WithClaudeCodePreset(),
+            agentsdk.WithTools(tools.DefaultTools()...),
+        )
+    },
+    Info: &acp.ImplementationInfo{
+        Name: "my-agent", Title: "My Agent", Version: "1.0.0",
+    },
+})
+
+// Blocks on stdin/stdout — the editor launches this as a subprocess.
+srv.Run()
+```
+
+The server handles the full ACP lifecycle:
+- `initialize` — version & capability negotiation
+- `session/new` — creates a new Agent session
+- `session/prompt` — sends user messages, streams `session/update` notifications back
+- `session/cancel` — cancels ongoing prompt turns
+- `session/request_permission` — reverse-calls the client for tool permission approval
+
+```bash
+go run ./examples/acp-server
+```
+
 ## Multi-turn Conversations
 
 ```go
@@ -396,6 +432,9 @@ agent.Run(ctx, "Start a new conversation.")
 |   MCP Client        |   SubAgentTool         |  Ecosystem
 |    -> tool discovery  |    -> task delegation   |
 +---------------------+------------------------+
+|   ACP Server (acp/)                          |  Protocol
+|    -> stdio JSON-RPC -> Editor integration    |
++----------------------------------------------+
 |   Permission | Hooks | CostTracker | Store   |  Advanced
 +----------------------------------------------+
 ```
@@ -407,6 +446,7 @@ See the [`examples/`](examples/) directory:
 - **[basic](examples/basic/)** — simple prompt and response
 - **[tools](examples/tools/)** — weather + time tools with streaming
 - **[streaming](examples/streaming/)** — real-time event handling
+- **[acp-server](examples/acp-server/)** — ACP protocol server over stdio
 
 ```bash
 export ANTHROPIC_AUTH_TOKEN=sk-...
@@ -433,6 +473,7 @@ make vet              # static analysis
 - [x] Phase 3: Advanced — Permission, Hooks, CostTracker, Store, Auto-compact
 - [x] Phase 4: Ecosystem — MCP client, sub-agents, interactive permissions
 - [x] Phase 5: Prompt Engineering — PromptBuilder, cache boundaries, presets, ContextProviders
+- [x] Phase 6: ACP Protocol — Agent Client Protocol server (stdio JSON-RPC, session management, streaming)
 - [ ] More providers: OpenAI, Bedrock, Vertex
 - [ ] Coordinator mode: multi-agent orchestration
 
