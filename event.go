@@ -1,5 +1,7 @@
 package agentsdk
 
+import "encoding/json"
+
 // EventType classifies user-facing events emitted during an agent run.
 type EventType string
 
@@ -7,6 +9,7 @@ const (
 	EventTextDelta         EventType = "text_delta"
 	EventThinkingDelta     EventType = "thinking_delta"
 	EventToolUseStart      EventType = "tool_use_start"
+	EventToolUseInput      EventType = "tool_use_input" // fired when tool input JSON is fully received
 	EventToolResult        EventType = "tool_result"
 	EventPermissionRequest EventType = "permission_request"
 	EventPermissionResult  EventType = "permission_result"
@@ -46,10 +49,13 @@ type Event struct {
 	Error error
 }
 
-// EventToolUse describes the start of a tool invocation.
+// EventToolUse describes a tool invocation.
+// For EventToolUseStart, only ID and Name are set.
+// For EventToolUseInput, Input is also populated with the complete input JSON.
 type EventToolUse struct {
-	ID   string
-	Name string
+	ID    string
+	Name  string
+	Input json.RawMessage // populated only in EventToolUseInput
 }
 
 // EventToolResultData describes the outcome of a single tool call.

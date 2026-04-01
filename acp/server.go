@@ -229,7 +229,20 @@ func (s *Server) makeEventHandler(sessionID string) agentsdk.EventHandler {
 				ToolCallID:    ev.ToolUse.ID,
 				Title:         ev.ToolUse.Name,
 				Kind:          classifyToolKind(ev.ToolUse.Name),
+				Status:        "pending",
+			})
+
+		case agentsdk.EventToolUseInput:
+			if ev.ToolUse == nil {
+				return
+			}
+			s.sendUpdate(sessionID, ToolCallNotification{
+				SessionUpdate: "tool_call",
+				ToolCallID:    ev.ToolUse.ID,
+				Title:         buildToolTitle(ev.ToolUse.Name, ev.ToolUse.Input),
+				Kind:          classifyToolKind(ev.ToolUse.Name),
 				Status:        "in_progress",
+				RawInput:      ev.ToolUse.Input,
 			})
 
 		case agentsdk.EventToolResult:
@@ -254,8 +267,6 @@ func (s *Server) makeEventHandler(sessionID string) agentsdk.EventHandler {
 			})
 
 		case agentsdk.EventPermissionRequest:
-			// The actual permission flow is handled by the SDK's PermissionHandler.
-			// Here we just stream an informational update.
 			if ev.Permission != nil {
 				s.logger.Printf("permission_request: tool=%s", ev.Permission.ToolName)
 			}
@@ -384,6 +395,87 @@ func classifyToolKind(name string) string {
 	default:
 		return "other"
 	}
+}
+
+// buildToolTitle generates a human-readable title from tool name and input JSON.
+// e.g. "file_write → /src/main.go", "bash → ls -la", "grep → pattern in /src"
+func buildToolTitle(name string, input json.RawMessage) string {
+	if len(input) == 0 {
+		return name
+	}
+
+	var m map[string]json.RawMessage
+	if json.Unmarshal(input, &m) != nil {
+		return name
+	}
+
+	str := func(key string) string {
+		raw, ok := m[key]
+		if !ok || len(raw) < 2 {
+			return ""
+		}
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return ""
+		}
+		return s
+	}
+
+	trim := func(s string, max int) string {
+		if len(s) <= max {
+			return s
+		}
+		return s[:max] + "…"
+	}
+
+	switch strings.ToLower(name) {
+	case "file_write", "filewrite", "write":
+		if p := str("file_path"); p != "" {
+			return name + " → " + p
+		}
+		if p := str("path"); p != "" {
+			return name + " → " + p
+		}
+	case "file_read", "fileread", "read":
+		if p := str("file_path"); p != "" {
+			return name + " → " + p
+		}
+		if p := str("path"); p != "" {
+			return name + " → " + p
+		}
+	case "file_edit", "fileedit", "edit":
+		if p := str("file_path"); p != "" {
+			return name + " → " + p
+		}
+		if p := str("path"); p != "" {
+			return name + " → " + p
+		}
+	case "bash", "shell", "exec":
+		if c := str("command"); c != "" {
+			return name + " → " + trim(c, 80)
+		}
+	case "glob":
+		if p := str("pattern"); p != "" {
+			return name + " → " + p
+		}
+	case "grep":
+		if p := str("pattern"); p != "" {
+			title := name + " → " + trim(p, 40)
+			if d := str("path"); d != "" {
+				title += " in " + d
+			}
+			return title
+		}
+	}
+
+	// Fallback: try common parameter names for unknown tools
+	for _, key := range []string{"file_path", "path", "command", "url", "query", "name"} {
+		if v := str(key); v != "" {
+			return name + " → " + trim(v, 80)
+		}
+	}
+
+	return name
 }
 
 func extractText(blocks []ContentBlock) string {

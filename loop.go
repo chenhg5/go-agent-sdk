@@ -378,6 +378,10 @@ func consumeStream(_ context.Context, stream Stream, handler EventHandler) (Mess
 					ID: currentBlock.ID, Name: currentBlock.Name,
 					Input: currentBlock.Input,
 				})
+				emit(handler, Event{
+					Type:    EventToolUseInput,
+					ToolUse: &EventToolUse{ID: currentBlock.ID, Name: currentBlock.Name, Input: currentBlock.Input},
+				})
 			}
 			blocks = append(blocks, *currentBlock)
 			currentBlock = nil

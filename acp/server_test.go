@@ -319,3 +319,30 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	}
 	return b
 }
+
+func TestBuildToolTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		tool  string
+		input string
+		want  string
+	}{
+		{"file_write with path", "file_write", `{"file_path":"/src/main.go","content":"hello"}`, "file_write → /src/main.go"},
+		{"bash with command", "bash", `{"command":"ls -la /tmp"}`, "bash → ls -la /tmp"},
+		{"grep with pattern+path", "grep", `{"pattern":"TODO","path":"/src"}`, "grep → TODO in /src"},
+		{"glob with pattern", "glob", `{"pattern":"**/*.go"}`, "glob → **/*.go"},
+		{"file_read path key", "file_read", `{"path":"/etc/hosts"}`, "file_read → /etc/hosts"},
+		{"unknown tool with url", "fetch", `{"url":"https://example.com"}`, "fetch → https://example.com"},
+		{"empty input", "bash", `{}`, "bash"},
+		{"nil input", "bash", ``, "bash"},
+		{"long command truncated", "bash", `{"command":"` + strings.Repeat("x", 100) + `"}`, "bash → " + strings.Repeat("x", 80) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildToolTitle(tt.tool, json.RawMessage(tt.input))
+			if got != tt.want {
+				t.Errorf("buildToolTitle(%q, %q)\n  got  %q\n  want %q", tt.tool, tt.input, got, tt.want)
+			}
+		})
+	}
+}
