@@ -122,6 +122,16 @@ func WithThinking(budgetTokens int) Option {
 	}
 }
 
+// WithAdaptiveThinking enables adaptive thinking where the model dynamically
+// decides how much to think. Supported on Claude Sonnet 4.6+ and Opus 4.6+.
+func WithAdaptiveThinking() Option {
+	return func(c *Config) {
+		c.Thinking = &ThinkingConfig{
+			Type: "adaptive",
+		}
+	}
+}
+
 // WithToolChoice forces a specific tool selection strategy.
 func WithToolChoice(tc ToolChoice) Option {
 	return func(c *Config) { c.ToolChoice = &tc }

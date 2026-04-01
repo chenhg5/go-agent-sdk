@@ -24,10 +24,11 @@ type options struct {
 
 func defaultOptions() options {
 	return options{
-		baseURL:    defaultBaseURL,
-		apiVersion: defaultAPIVersion,
-		httpClient: &http.Client{Timeout: defaultTimeout},
-		maxRetries: defaultMaxRetries,
+		baseURL:      defaultBaseURL,
+		apiVersion:   defaultAPIVersion,
+		httpClient:   &http.Client{Timeout: defaultTimeout},
+		maxRetries:   defaultMaxRetries,
+		betaFeatures: []string{"interleaved-thinking-2025-05-14"},
 	}
 }
 

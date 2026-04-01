@@ -140,7 +140,7 @@ type apiRequest struct {
 
 type thinkingWire struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) ([]byte, error) {
@@ -185,15 +185,19 @@ func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) (
 		r.System = raw
 	}
 
-	if params.Thinking != nil && params.Thinking.BudgetTokens > 0 {
-		r.Thinking = &thinkingWire{
-			Type:         params.Thinking.Type,
-			BudgetTokens: params.Thinking.BudgetTokens,
+	if params.Thinking != nil && params.Thinking.Type != "" {
+		tw := &thinkingWire{Type: params.Thinking.Type}
+		if params.Thinking.Type == "enabled" && params.Thinking.BudgetTokens > 0 {
+			tw.BudgetTokens = params.Thinking.BudgetTokens
 		}
+		r.Thinking = tw
 	}
 	data, err := json.Marshal(r)
 	if os.Getenv("AGENT_DEBUG") != "" {
 		fmt.Fprintf(os.Stderr, "[DEBUG] request body (%d bytes): %s\n", len(data), truncateDebug(data, 2000))
+		if r.Thinking != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] thinking: type=%s budget=%d\n", r.Thinking.Type, r.Thinking.BudgetTokens)
+		}
 	}
 	return data, err
 }
