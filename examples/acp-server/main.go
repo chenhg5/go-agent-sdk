@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	agentsdk "github.com/chenhg5/go-agent-sdk"
 	"github.com/chenhg5/go-agent-sdk/acp"
@@ -62,8 +63,14 @@ func createAgent(_ context.Context, params acp.NewSessionParams, perm agentsdk.P
 	}
 
 	var providerOpts []claude.Option
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-		providerOpts = append(providerOpts, claude.WithBaseURL(base))
+	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if baseURL != "" {
+		providerOpts = append(providerOpts, claude.WithBaseURL(baseURL))
+	}
+
+	// Third-party proxies often don't support the array-format system parameter.
+	if baseURL != "" && !strings.Contains(baseURL, "anthropic.com") {
+		providerOpts = append(providerOpts, claude.WithForceStringSystem())
 	}
 
 	model := os.Getenv("ANTHROPIC_MODEL")

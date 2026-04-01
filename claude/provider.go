@@ -153,11 +153,24 @@ func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) (
 
 	// System prompt: structured blocks (with cache control) take precedence over plain string.
 	if len(params.SystemBlocks) > 0 {
-		raw, err := json.Marshal(params.SystemBlocks)
-		if err != nil {
-			return nil, fmt.Errorf("claude: marshal system blocks: %w", err)
+		if p.opts.forceStringSystem {
+			// Flatten blocks into a single string for proxies that don't support the array format.
+			var sb strings.Builder
+			for i, b := range params.SystemBlocks {
+				if i > 0 {
+					sb.WriteString("\n\n")
+				}
+				sb.WriteString(b.Text)
+			}
+			raw, _ := json.Marshal(sb.String())
+			r.System = raw
+		} else {
+			raw, err := json.Marshal(params.SystemBlocks)
+			if err != nil {
+				return nil, fmt.Errorf("claude: marshal system blocks: %w", err)
+			}
+			r.System = raw
 		}
-		r.System = raw
 	} else if params.System != "" {
 		raw, err := json.Marshal(params.System)
 		if err != nil {

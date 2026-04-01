@@ -13,12 +13,13 @@ const (
 )
 
 type options struct {
-	baseURL      string
-	apiVersion   string
-	httpClient   *http.Client
-	maxRetries   int
-	betaFeatures []string
-	extraHeaders map[string]string
+	baseURL           string
+	apiVersion        string
+	httpClient        *http.Client
+	maxRetries        int
+	betaFeatures      []string
+	extraHeaders      map[string]string
+	forceStringSystem bool // flatten SystemBlocks into a plain string (for proxies that don't support array system)
 }
 
 func defaultOptions() options {
@@ -61,4 +62,11 @@ func WithBetaFeatures(features ...string) Option {
 // WithExtraHeaders adds custom HTTP headers to every request.
 func WithExtraHeaders(headers map[string]string) Option {
 	return func(o *options) { o.extraHeaders = headers }
+}
+
+// WithForceStringSystem forces the provider to flatten structured SystemBlocks
+// into a single concatenated string. Use this for third-party proxies (e.g.
+// DashScope) that do not support the array format for the system parameter.
+func WithForceStringSystem() Option {
+	return func(o *options) { o.forceStringSystem = true }
 }
