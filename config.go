@@ -29,6 +29,11 @@ type Config struct {
 	Store             ConversationStore
 	ConversationID    string
 	Compact           *CompactConfig
+
+	// --- phase 5: prompt engineering ---
+	PromptBuilder    *PromptBuilder
+	AppendPrompt     string            // appended after system prompt (preset or custom)
+	ContextProviders []ContextProvider  // dynamic context injected into first user message
 }
 
 func defaultConfig() Config {
@@ -120,6 +125,40 @@ func WithThinking(budgetTokens int) Option {
 // WithToolChoice forces a specific tool selection strategy.
 func WithToolChoice(tc ToolChoice) Option {
 	return func(c *Config) { c.ToolChoice = &tc }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: prompt engineering options
+// ---------------------------------------------------------------------------
+
+// WithPromptBuilder sets a structured PromptBuilder to assemble the system prompt.
+// When set, this takes precedence over WithSystemPrompt.
+func WithPromptBuilder(b *PromptBuilder) Option {
+	return func(c *Config) { c.PromptBuilder = b }
+}
+
+// WithClaudeCodePreset configures the agent with Claude Code's system prompt sections.
+// Optional append text is added after the preset sections.
+func WithClaudeCodePreset(append ...string) Option {
+	return func(c *Config) {
+		b := ClaudeCodePreset()
+		if len(append) > 0 && append[0] != "" {
+			b.Append(append[0])
+		}
+		c.PromptBuilder = b
+	}
+}
+
+// WithAppendPrompt appends text after the system prompt (works with both
+// plain string prompts and PromptBuilder).
+func WithAppendPrompt(text string) Option {
+	return func(c *Config) { c.AppendPrompt = text }
+}
+
+// WithContextProviders adds ContextProviders for dynamic user-message injection.
+// Context is resolved once per Run call and injected into the first user message.
+func WithContextProviders(providers ...ContextProvider) Option {
+	return func(c *Config) { c.ContextProviders = append(c.ContextProviders, providers...) }
 }
 
 // ---------------------------------------------------------------------------

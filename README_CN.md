@@ -15,6 +15,7 @@
 - **权限控制** — 支持同步/异步交互式权限确认，Agent 循环自动暂停等待用户决策
 - **MCP 支持** — 通过 Model Context Protocol 动态发现和调用外部工具
 - **子 Agent** — 支持任务委派给子 Agent 并收集结果
+- **Prompt 工程** — 结构化 Prompt 组装、缓存分界线、预设模板、动态上下文注入，对齐 Claude Code 架构
 
 ## 安装
 
@@ -251,6 +252,81 @@ agentsdk.WithCompact(200000,
 )
 ```
 
+## System Prompt 工程
+
+SDK 提供了对齐 Claude Code 多段落架构的结构化 Prompt 组装系统，支持缓存分界线、动态上下文注入和预设模板。
+
+### 方式 1：简单字符串（向后兼容）
+
+```go
+agentsdk.WithSystemPrompt("你是一个有用的编码助手。")
+```
+
+### 方式 2：Claude Code 预设
+
+内置 Claude Code 的系统提示词段落（身份、规则、任务指南、工具用法、语气、输出效率）：
+
+```go
+agentsdk.WithClaudeCodePreset()
+
+// 追加自定义指令:
+agentsdk.WithClaudeCodePreset("始终用中文回答。")
+```
+
+### 方式 3：PromptBuilder（完全控制）
+
+多段落组装 + Anthropic Prompt 缓存支持：
+
+```go
+builder := agentsdk.NewPromptBuilder().
+    CachedSection("identity", "你是 Go 专家。", 10).          // 可缓存段
+    CachedSection("rules", "# 规则\n始终使用 error wrapping。", 20).
+    Section("env", envInfo, 30).                               // 动态段
+    Append("注重性能优化。")
+
+agent, _ := agentsdk.New(
+    agentsdk.WithProvider(provider),
+    agentsdk.WithPromptBuilder(builder),
+)
+```
+
+`BuildBlocks()` 生成带 `cache_control` 标记的结构化 System Block，最后一个 cached 段带 `{"type": "ephemeral"}`，实现跨轮次的 Prompt 缓存。
+
+### 方式 4：追加模式
+
+```go
+agentsdk.WithSystemPrompt("你是代码审查助手。"),
+agentsdk.WithAppendPrompt("每次审查都给代码质量打 1-10 分。")
+```
+
+### 动态上下文注入
+
+ContextProvider 将环境信息注入首条用户消息，包裹在 `<system-reminder>` 标签中（与 Claude Code 一致）：
+
+```go
+agent, _ := agentsdk.New(
+    agentsdk.WithProvider(provider),
+    agentsdk.WithClaudeCodePreset(),
+    agentsdk.WithContextProviders(
+        agentsdk.GitContext{WorkDir: "."},           // 分支、变更、最近提交
+        agentsdk.DateContext{},                       // 当前日期
+        agentsdk.EnvContext{Model: "claude-sonnet"},  // 操作系统、Shell、工作目录
+        agentsdk.CLAUDEMDContext{WorkDir: ".", IncludeUser: true}, // CLAUDE.md 项目指令
+    ),
+)
+```
+
+内置 Provider：
+
+| Provider | 提供内容 |
+|---|---|
+| `GitContext` | 分支名、文件变更、最近 5 次提交 |
+| `DateContext` | 当前日期 |
+| `EnvContext` | 操作系统、架构、Shell、工作目录、模型名 |
+| `CLAUDEMDContext` | 项目指令（`CLAUDE.md` / `.claude/CLAUDE.md`） |
+| `StaticContext` | 自定义固定文本 |
+| `ContextProviderFunc` | 函数适配器（一次性 Provider） |
+
 ## 多轮对话
 
 ```go
@@ -266,7 +342,11 @@ agent.Run(ctx, "开始新对话")
 |---|---|---|
 | `WithProvider(p)` | LLM Provider（**必填**） | — |
 | `WithModel(m)` | 模型名称 | `claude-sonnet-4-20250514` |
-| `WithSystemPrompt(s)` | 系统提示词 | `""` |
+| `WithSystemPrompt(s)` | 系统提示词（纯字符串） | `""` |
+| `WithClaudeCodePreset(append?)` | Claude Code 对齐的系统提示词 | — |
+| `WithPromptBuilder(b)` | 结构化多段落 Prompt | `nil` |
+| `WithAppendPrompt(s)` | 追加文本到系统提示词后 | `""` |
+| `WithContextProviders(p...)` | 动态上下文注入 | `[]` |
 | `WithMaxTokens(n)` | 每次调用最大输出 token | `16384` |
 | `WithMaxTurns(n)` | 轮次上限（0=无限） | `0` |
 | `WithTemperature(t)` | 采样温度 | `nil` |
@@ -286,8 +366,11 @@ agent.Run(ctx, "开始新对话")
 │                 Agent (agent.go)             │  公共 API
 │  Run / RunStream / RunMessages / Reset       │
 ├──────────────────────────────────────────────┤
+│     PromptBuilder + ContextProviders         │  Prompt 组装
+│  段落组装 → 缓存分界线 → 动态上下文注入       │  (Phase 5)
+├──────────────────────────────────────────────┤
 │              Agent Loop (loop.go)            │  核心循环
-│  构建参数 → 流式调用 → 权限检查 → 工具执行 → ↻ │
+│  解析Prompt → 流式调用 → 权限检查 → 工具执行 → ↻ │
 ├─────────────────────┬────────────────────────┤
 │   Provider (接口)   │   ToolExecutor (接口)  │  可替换接口
 │   └→ claude/        │   └→ Parallel/Seq      │
@@ -323,6 +406,7 @@ go run ./examples/streaming
 - [x] Phase 2: 内置工具 — Bash、文件读写、Glob、Grep
 - [x] Phase 3: 高级功能 — 权限控制、钩子、费用追踪、会话持久化、上下文压缩
 - [x] Phase 4: 生态扩展 — MCP Client、子 Agent、交互式权限
+- [x] Phase 5: Prompt 工程 — PromptBuilder、缓存分界线、预设模板、ContextProviders
 - [ ] 更多 Provider: OpenAI、Bedrock、Vertex
 - [ ] Coordinator Mode: 多 Agent 编排
 

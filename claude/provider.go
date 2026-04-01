@@ -125,7 +125,7 @@ func (p *Provider) doHTTP(ctx context.Context, body []byte) (*http.Response, err
 type apiRequest struct {
 	Model         string               `json:"model"`
 	Messages      []agentsdk.Message   `json:"messages"`
-	System        string               `json:"system,omitempty"`
+	System        json.RawMessage      `json:"system,omitempty"`
 	MaxTokens     int                  `json:"max_tokens"`
 	Stream        bool                 `json:"stream,omitempty"`
 	Tools         []agentsdk.ToolSpec  `json:"tools,omitempty"`
@@ -145,11 +145,27 @@ type thinkingWire struct {
 func (p *Provider) marshalRequest(params *agentsdk.MessageParams, stream bool) ([]byte, error) {
 	r := apiRequest{
 		Model: params.Model, Messages: params.Messages,
-		System: params.System, MaxTokens: params.MaxTokens,
+		MaxTokens: params.MaxTokens,
 		Stream: stream, Tools: params.Tools,
 		Temperature: params.Temperature, TopP: params.TopP, TopK: params.TopK,
 		StopSequences: params.StopSequences, ToolChoice: params.ToolChoice,
 	}
+
+	// System prompt: structured blocks (with cache control) take precedence over plain string.
+	if len(params.SystemBlocks) > 0 {
+		raw, err := json.Marshal(params.SystemBlocks)
+		if err != nil {
+			return nil, fmt.Errorf("claude: marshal system blocks: %w", err)
+		}
+		r.System = raw
+	} else if params.System != "" {
+		raw, err := json.Marshal(params.System)
+		if err != nil {
+			return nil, fmt.Errorf("claude: marshal system prompt: %w", err)
+		}
+		r.System = raw
+	}
+
 	if params.Thinking != nil && params.Thinking.BudgetTokens > 0 {
 		r.Thinking = &thinkingWire{
 			Type:         params.Thinking.Type,

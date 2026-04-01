@@ -267,6 +267,81 @@ agentsdk.WithCompact(200000,
 )
 ```
 
+## System Prompt Engineering
+
+The SDK provides a structured prompt assembly system aligned with Claude Code's multi-section architecture — including cache boundaries, dynamic context injection, and preset templates.
+
+### Method 1: Simple string (backward compatible)
+
+```go
+agentsdk.WithSystemPrompt("You are a helpful coding assistant.")
+```
+
+### Method 2: Claude Code Preset
+
+Pre-built sections mirroring Claude Code's system prompt (identity, system rules, task guidelines, tool usage, tone, output efficiency):
+
+```go
+agentsdk.WithClaudeCodePreset()
+
+// Or with appended instructions:
+agentsdk.WithClaudeCodePreset("Always respond in Chinese.")
+```
+
+### Method 3: PromptBuilder (full control)
+
+Assemble multi-section prompts with cache boundaries for Anthropic's prompt caching:
+
+```go
+builder := agentsdk.NewPromptBuilder().
+    CachedSection("identity", "You are an expert Go developer.", 10).
+    CachedSection("rules", "# Rules\nAlways use error wrapping.", 20).
+    Section("env", envInfo, 30). // dynamic, not cached
+    Append("Focus on performance.")
+
+agent, _ := agentsdk.New(
+    agentsdk.WithProvider(provider),
+    agentsdk.WithPromptBuilder(builder),
+)
+```
+
+`BuildBlocks()` produces structured system blocks with `cache_control` markers — the last cached block gets `{"type": "ephemeral"}`, enabling prompt caching across turns.
+
+### Method 4: Append to any prompt
+
+```go
+agentsdk.WithSystemPrompt("You are a code reviewer."),
+agentsdk.WithAppendPrompt("Rate code quality 1-10 for every review.")
+```
+
+### Dynamic Context Injection
+
+ContextProviders inject environment information into the first user message, wrapped in `<system-reminder>` tags (matching Claude Code's pattern):
+
+```go
+agent, _ := agentsdk.New(
+    agentsdk.WithProvider(provider),
+    agentsdk.WithClaudeCodePreset(),
+    agentsdk.WithContextProviders(
+        agentsdk.GitContext{WorkDir: "."},         // branch, status, recent commits
+        agentsdk.DateContext{},                     // current date
+        agentsdk.EnvContext{Model: "claude-sonnet"}, // OS, shell, working dir
+        agentsdk.CLAUDEMDContext{WorkDir: ".", IncludeUser: true}, // CLAUDE.md project instructions
+    ),
+)
+```
+
+Built-in providers:
+
+| Provider | Content |
+|---|---|
+| `GitContext` | Branch, file changes, recent 5 commits |
+| `DateContext` | Current date |
+| `EnvContext` | OS, architecture, shell, working directory, model |
+| `CLAUDEMDContext` | Project instructions from `CLAUDE.md` / `.claude/CLAUDE.md` |
+| `StaticContext` | Fixed custom text |
+| `ContextProviderFunc` | Function adapter for one-off providers |
+
 ## Multi-turn Conversations
 
 ```go
@@ -282,7 +357,11 @@ agent.Run(ctx, "Start a new conversation.")
 |---|---|---|
 | `WithProvider(p)` | LLM provider (**required**) | -- |
 | `WithModel(m)` | Model name | `claude-sonnet-4-20250514` |
-| `WithSystemPrompt(s)` | System prompt | `""` |
+| `WithSystemPrompt(s)` | System prompt (plain string) | `""` |
+| `WithClaudeCodePreset(append?)` | Claude Code-aligned system prompt | -- |
+| `WithPromptBuilder(b)` | Structured multi-section prompt | `nil` |
+| `WithAppendPrompt(s)` | Append text after system prompt | `""` |
+| `WithContextProviders(p...)` | Dynamic context injection | `[]` |
 | `WithMaxTokens(n)` | Max output tokens per call | `16384` |
 | `WithMaxTurns(n)` | Turn limit (0 = unlimited) | `0` |
 | `WithTemperature(t)` | Sampling temperature | `nil` |
@@ -302,8 +381,11 @@ agent.Run(ctx, "Start a new conversation.")
 |                 Agent (agent.go)             |  Public API
 |  Run / RunStream / RunMessages / Reset       |
 +----------------------------------------------+
+|        PromptBuilder + ContextProviders      |  Prompt Assembly
+|  sections → cache boundary → dynamic ctx     |  (Phase 5)
++----------------------------------------------+
 |              Agent Loop (loop.go)            |  Core loop
-|  build params -> stream LLM -> exec tools    |
+|  resolve prompt → stream LLM → exec tools   |
 +---------------------+------------------------+
 |   Provider (i/f)    |   ToolExecutor (i/f)   |  Swappable
 |    -> claude/        |    -> Parallel/Seq      |  interfaces
@@ -350,6 +432,7 @@ make vet              # static analysis
 - [x] Phase 2: Built-in tools — Bash, FileRead, FileEdit, FileWrite, Glob, Grep
 - [x] Phase 3: Advanced — Permission, Hooks, CostTracker, Store, Auto-compact
 - [x] Phase 4: Ecosystem — MCP client, sub-agents, interactive permissions
+- [x] Phase 5: Prompt Engineering — PromptBuilder, cache boundaries, presets, ContextProviders
 - [ ] More providers: OpenAI, Bedrock, Vertex
 - [ ] Coordinator mode: multi-agent orchestration
 

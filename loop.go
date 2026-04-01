@@ -10,16 +10,74 @@ import (
 
 // loopState is the mutable state carried across iterations of the agent loop.
 type loopState struct {
-	messages  []Message
-	turnCount int
-	usage     Usage
+	messages     []Message
+	turnCount    int
+	usage        Usage
+	systemPrompt string        // resolved once per Run
+	systemBlocks []SystemBlock // structured alternative (takes precedence)
+}
+
+// resolvePrompt builds the system prompt once per Run.
+// Priority: PromptBuilder > SystemPrompt string, with AppendPrompt appended.
+func (a *agent) resolvePrompt(ctx context.Context, state *loopState) error {
+	if a.config.PromptBuilder != nil {
+		blocks, err := a.config.PromptBuilder.BuildBlocks(ctx)
+		if err != nil {
+			return fmt.Errorf("prompt builder: %w", err)
+		}
+		state.systemBlocks = blocks
+		return nil
+	}
+
+	prompt := a.config.SystemPrompt
+	if a.config.AppendPrompt != "" {
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+		prompt += a.config.AppendPrompt
+	}
+	state.systemPrompt = prompt
+	return nil
+}
+
+// resolveContext gathers dynamic context from ContextProviders and injects
+// it into the first user message wrapped in <system-reminder> tags.
+func (a *agent) resolveContext(ctx context.Context, state *loopState) error {
+	if len(a.config.ContextProviders) == 0 {
+		return nil
+	}
+
+	parts := make(map[string]string)
+	for _, p := range a.config.ContextProviders {
+		text, err := p.Provide(ctx)
+		if err != nil {
+			return fmt.Errorf("context provider %q: %w", p.Name(), err)
+		}
+		if text != "" {
+			parts[p.Name()] = text
+		}
+	}
+
+	if len(parts) > 0 {
+		state.messages = InjectContext(state.messages, WrapUserContext(parts))
+	}
+	return nil
 }
 
 // runLoop is the core agentic loop:
 //
-//	compact → build params → stream LLM → permission check →
-//	hook:before → execute tools → hook:after → track cost → repeat
+//	resolve prompt → resolve context → compact → build params →
+//	stream LLM → permission check → hook:before → execute tools →
+//	hook:after → track cost → repeat
 func (a *agent) runLoop(ctx context.Context, state *loopState, handler EventHandler) (*RunResult, error) {
+	// Resolve system prompt and user context once before the loop starts.
+	if err := a.resolvePrompt(ctx, state); err != nil {
+		return nil, err
+	}
+	if err := a.resolveContext(ctx, state); err != nil {
+		return nil, err
+	}
+
 	for {
 		state.turnCount++
 
@@ -38,7 +96,7 @@ func (a *agent) runLoop(ctx context.Context, state *loopState, handler EventHand
 		}
 
 		// --- build request ---
-		params := a.buildParams(state.messages)
+		params := a.buildParams(state)
 
 		// --- stream LLM response ---
 		stream, err := a.config.Provider.CreateMessageStream(ctx, params)
@@ -220,11 +278,10 @@ func (a *agent) buildResult(state *loopState, reason TerminalReason) *RunResult 
 }
 
 // buildParams assembles the MessageParams for a single LLM call.
-func (a *agent) buildParams(messages []Message) *MessageParams {
+func (a *agent) buildParams(state *loopState) *MessageParams {
 	p := &MessageParams{
 		Model:         a.config.Model,
-		Messages:      messages,
-		System:        a.config.SystemPrompt,
+		Messages:      state.messages,
 		MaxTokens:     a.config.MaxTokens,
 		Temperature:   a.config.Temperature,
 		TopP:          a.config.TopP,
@@ -234,6 +291,13 @@ func (a *agent) buildParams(messages []Message) *MessageParams {
 		Thinking:      a.config.Thinking,
 		Stream:        true,
 	}
+
+	if len(state.systemBlocks) > 0 {
+		p.SystemBlocks = state.systemBlocks
+	} else {
+		p.System = state.systemPrompt
+	}
+
 	if specs := a.config.Tools.Specs(); len(specs) > 0 {
 		p.Tools = specs
 	}

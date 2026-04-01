@@ -32,6 +32,7 @@ type MessageParams struct {
 	Model         string          `json:"model"`
 	Messages      []Message       `json:"messages"`
 	System        string          `json:"system,omitempty"`
+	SystemBlocks  []SystemBlock   `json:"system_blocks,omitempty"` // structured system prompt with cache control (takes precedence over System)
 	Tools         []ToolSpec      `json:"tools,omitempty"`
 	MaxTokens     int             `json:"max_tokens"`
 	Temperature   *float64        `json:"temperature,omitempty"`
