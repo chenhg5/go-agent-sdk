@@ -19,6 +19,31 @@ type ToolValidator interface {
 	ValidateInput(input json.RawMessage) error
 }
 
+// ToolPrompter is an optional interface a Tool may implement to provide
+// a rich, dynamic description for the LLM API.
+//
+// When a tool implements ToolPrompter, its Prompt() output is used as the
+// API-level tool description instead of the static Description from Definition().
+// This mirrors Claude Code's pattern where each tool's prompt() method returns
+// detailed usage instructions, best practices, and cross-references to other tools.
+//
+// The PromptContext provides information about the current tool pool and
+// configuration, allowing the prompt to reference other registered tools.
+type ToolPrompter interface {
+	Prompt(ctx PromptContext) string
+}
+
+// PromptContext provides context for dynamic tool prompt generation.
+type PromptContext struct {
+	// Tools lists all registered tool names, allowing cross-references
+	// like "use Read instead of cat via Bash".
+	Tools []string
+	// Model is the current model name, for model-specific instructions.
+	Model string
+	// CWD is the current working directory.
+	CWD string
+}
+
 // ToolPermChecker is an optional interface a Tool may implement to check
 // permissions before execution.
 type ToolPermChecker interface {

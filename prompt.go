@@ -2,6 +2,7 @@ package agentsdk
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -346,4 +347,145 @@ func InjectContext(messages []Message, contextText string) []Message {
 	}
 	out[0] = Message{Role: first.Role, Content: blocks}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic tool-usage section — references actual registered tools
+// ---------------------------------------------------------------------------
+
+// toolNameMap maps Claude Code canonical tool names to common aliases.
+var toolNameMap = map[string]struct {
+	readName  string
+	shellAlts string
+}{
+	"file_read":  {"file_read", "cat, head, tail, or sed"},
+	"file_edit":  {"file_edit", "sed or awk"},
+	"file_write": {"file_write", "cat with heredoc or echo redirection"},
+	"glob":       {"glob", "find or ls"},
+	"grep":       {"grep", "grep or rg"},
+}
+
+// BuildToolUsageSection generates the "Using your tools" system prompt
+// section that references only tools actually in the registry.
+// This mirrors Claude Code's getUsingYourToolsSection(enabledTools).
+func BuildToolUsageSection(toolNames []string) string {
+	nameSet := make(map[string]bool, len(toolNames))
+	for _, n := range toolNames {
+		nameSet[strings.ToLower(n)] = true
+	}
+
+	hasBash := nameSet["bash"]
+
+	var rules []string
+
+	if hasBash {
+		var substitutions []string
+		for key, info := range toolNameMap {
+			if nameSet[key] {
+				substitutions = append(substitutions,
+					fmt.Sprintf("  - Use %s instead of %s", info.readName, info.shellAlts))
+			}
+		}
+		if len(substitutions) > 0 {
+			sort.Strings(substitutions)
+			rules = append(rules,
+				"- Do NOT use the bash tool to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work:\n"+
+					strings.Join(substitutions, "\n")+
+					"\n  - Reserve using bash exclusively for system commands and terminal operations")
+		}
+	}
+
+	rules = append(rules,
+		"- You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel.")
+
+	return "# Using your tools\n\n" + strings.Join(rules, "\n")
+}
+
+// ClaudeCodePresetForTools creates a preset with tool-usage section
+// dynamically generated from actual tool names.
+func ClaudeCodePresetForTools(toolNames []string) *PromptBuilder {
+	return NewPromptBuilder().
+		CachedSection("identity", sectionIdentity, 10).
+		CachedSection("system_rules", sectionSystemRules, 20).
+		CachedSection("doing_tasks", sectionDoingTasks, 30).
+		CachedSection("safe_actions", sectionSafeActions, 40).
+		CachedSection("tool_usage", BuildToolUsageSection(toolNames), 50).
+		CachedSection("tone_style", sectionToneStyle, 60).
+		CachedSection("output_efficiency", sectionOutputEfficiency, 70)
+}
+
+// ---------------------------------------------------------------------------
+// CacheScope — multi-tier cache scoping for system blocks
+// ---------------------------------------------------------------------------
+
+// CacheScope controls the cache tier for a system block.
+// Mirrors Claude Code's global/org/null three-tier caching.
+type CacheScope string
+
+const (
+	CacheScopeNone      CacheScope = ""         // no caching
+	CacheScopeEphemeral CacheScope = "ephemeral" // session-level (default)
+	CacheScopeOrg       CacheScope = "org"       // org-level, shared across users
+	CacheScopeGlobal    CacheScope = "global"    // global, shared across all orgs
+)
+
+// ScopedSystemBlock extends SystemBlock with explicit cache scope control.
+type ScopedSystemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *ScopedCache  `json:"cache_control,omitempty"`
+}
+
+// ScopedCache extends CacheControl with scope and TTL.
+type ScopedCache struct {
+	Type  string `json:"type"`            // "ephemeral"
+	Scope string `json:"scope,omitempty"` // "global", "org"
+	TTL   string `json:"ttl,omitempty"`   // "5m", "1h"
+}
+
+// BuildScopedBlocks produces system blocks with multi-tier cache scopes.
+// Static sections get CacheScopeGlobal, dynamic sections get no cache scope.
+func (b *PromptBuilder) BuildScopedBlocks(ctx context.Context) ([]ScopedSystemBlock, error) {
+	sorted := b.sorted()
+
+	var cached, dynamic []PromptSection
+	for _, s := range sorted {
+		if s.Cached {
+			cached = append(cached, s)
+		} else {
+			dynamic = append(dynamic, s)
+		}
+	}
+
+	var blocks []ScopedSystemBlock
+
+	for i, s := range cached {
+		blk := ScopedSystemBlock{Type: "text", Text: s.Content}
+		if i == len(cached)-1 {
+			blk.CacheControl = &ScopedCache{Type: "ephemeral", Scope: "global"}
+		}
+		blocks = append(blocks, blk)
+	}
+
+	for _, s := range dynamic {
+		if s.Content != "" {
+			blocks = append(blocks, ScopedSystemBlock{Type: "text", Text: s.Content})
+		}
+	}
+
+	for _, p := range b.providers {
+		text, err := p.Provide(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if text != "" {
+			blocks = append(blocks, ScopedSystemBlock{Type: "text", Text: text})
+		}
+	}
+
+	if b.append != "" {
+		blocks = append(blocks, ScopedSystemBlock{Type: "text", Text: b.append})
+	}
+
+	return blocks, nil
 }

@@ -60,15 +60,37 @@ func (r *ToolRegistry) All() []Tool {
 	return out
 }
 
+// Names returns all registered tool names in insertion order.
+func (r *ToolRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
 // Specs returns the API-facing ToolSpec list in stable order.
 func (r *ToolRegistry) Specs() []ToolSpec {
+	return r.SpecsWithContext(PromptContext{})
+}
+
+// SpecsWithContext returns tool specs, using ToolPrompter.Prompt()
+// for tools that implement it. This provides rich, context-aware
+// descriptions to the LLM instead of static one-liners.
+func (r *ToolRegistry) SpecsWithContext(pctx PromptContext) []ToolSpec {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]ToolSpec, 0, len(r.order))
 	for _, name := range r.order {
-		if t, ok := r.tools[name]; ok {
-			out = append(out, t.Definition())
+		t, ok := r.tools[name]
+		if !ok {
+			continue
 		}
+		spec := t.Definition()
+		if p, yes := t.(ToolPrompter); yes {
+			spec.Description = p.Prompt(pctx)
+		}
+		out = append(out, spec)
 	}
 	return out
 }

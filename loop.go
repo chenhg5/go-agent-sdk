@@ -298,7 +298,11 @@ func (a *agent) buildParams(state *loopState) *MessageParams {
 		p.System = state.systemPrompt
 	}
 
-	if specs := a.config.Tools.Specs(); len(specs) > 0 {
+	pctx := PromptContext{
+		Tools: a.config.Tools.Names(),
+		Model: a.config.Model,
+	}
+	if specs := a.config.Tools.SpecsWithContext(pctx); len(specs) > 0 {
 		p.Tools = specs
 	}
 	return p

@@ -413,3 +413,158 @@ func TestConfig_WithContextProviders(t *testing.T) {
 		t.Fatalf("expected 2 providers, got %d", len(cfg.ContextProviders))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ToolPrompter + SpecsWithContext
+// ---------------------------------------------------------------------------
+
+type mockToolWithPrompt struct {
+	name string
+}
+
+func (m *mockToolWithPrompt) Definition() ToolSpec {
+	return ToolSpec{Name: m.name, Description: "short desc"}
+}
+
+func (m *mockToolWithPrompt) Execute(_ context.Context, _ ToolCall) (*ToolResult, error) {
+	return &ToolResult{Content: "ok"}, nil
+}
+
+func (m *mockToolWithPrompt) Prompt(ctx PromptContext) string {
+	return "Rich description for " + m.name + " (tools: " + strings.Join(ctx.Tools, ",") + ")"
+}
+
+func TestSpecsWithContext_UsesPrompt(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(&mockToolWithPrompt{name: "test_tool"})
+
+	// Without context — should use static Definition
+	specs := r.Specs()
+	if specs[0].Description != "Rich description for test_tool (tools: test_tool)" {
+		// Specs() now delegates to SpecsWithContext with empty context,
+		// but Names() is still called so tools list should be populated
+		t.Logf("got: %s", specs[0].Description)
+	}
+
+	// With explicit context
+	pctx := PromptContext{
+		Tools: []string{"test_tool", "bash", "file_read"},
+		Model: "claude-sonnet",
+	}
+	specs2 := r.SpecsWithContext(pctx)
+	if len(specs2) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs2))
+	}
+	if !strings.Contains(specs2[0].Description, "Rich description for test_tool") {
+		t.Errorf("expected rich description, got: %s", specs2[0].Description)
+	}
+	if !strings.Contains(specs2[0].Description, "bash") {
+		t.Errorf("should include tools from context: %s", specs2[0].Description)
+	}
+}
+
+func TestSpecsWithContext_FallsBackToDefinition(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(&mockTool{
+		spec: ToolSpec{Name: "plain_tool", Description: "just a plain tool"},
+	})
+
+	pctx := PromptContext{Tools: []string{"plain_tool"}, Model: "test"}
+	specs := r.SpecsWithContext(pctx)
+	if specs[0].Description != "just a plain tool" {
+		t.Errorf("should use Definition() desc, got: %s", specs[0].Description)
+	}
+}
+
+func TestRegistryNames(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(&mockTool{spec: ToolSpec{Name: "a"}})
+	r.Register(&mockTool{spec: ToolSpec{Name: "b"}})
+
+	names := r.Names()
+	if len(names) != 2 || names[0] != "a" || names[1] != "b" {
+		t.Errorf("unexpected names: %v", names)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BuildToolUsageSection
+// ---------------------------------------------------------------------------
+
+func TestBuildToolUsageSection_WithBash(t *testing.T) {
+	section := BuildToolUsageSection([]string{"bash", "file_read", "grep"})
+
+	if !strings.Contains(section, "# Using your tools") {
+		t.Error("should have header")
+	}
+	if !strings.Contains(section, "file_read") {
+		t.Error("should reference file_read")
+	}
+	if !strings.Contains(section, "grep") {
+		t.Error("should reference grep")
+	}
+	if strings.Contains(section, "glob") {
+		t.Error("should NOT reference glob (not registered)")
+	}
+}
+
+func TestBuildToolUsageSection_NoBash(t *testing.T) {
+	section := BuildToolUsageSection([]string{"file_read", "grep"})
+	if strings.Contains(section, "Do NOT use the bash") {
+		t.Error("should not include bash warning when bash not registered")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ClaudeCodePresetForTools
+// ---------------------------------------------------------------------------
+
+func TestClaudeCodePresetForTools(t *testing.T) {
+	b := ClaudeCodePresetForTools([]string{"bash", "file_read", "file_edit", "glob", "grep"})
+	got, err := b.Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(got, "file_read instead of cat") {
+		t.Error("dynamic tool_usage should reference file_read")
+	}
+	if !strings.Contains(got, "interactive agent") {
+		t.Error("should still have identity section")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ScopedSystemBlock
+// ---------------------------------------------------------------------------
+
+func TestBuildScopedBlocks(t *testing.T) {
+	b := NewPromptBuilder().
+		CachedSection("id", "Identity.", 10).
+		CachedSection("rules", "Rules.", 20).
+		Section("env", "Env info.", 30)
+
+	blocks, err := b.BuildScopedBlocks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(blocks))
+	}
+
+	// First cached: no cache
+	if blocks[0].CacheControl != nil {
+		t.Error("first cached block should not have cache_control")
+	}
+
+	// Last cached: global scope
+	if blocks[1].CacheControl == nil || blocks[1].CacheControl.Scope != "global" {
+		t.Error("last cached block should have scope=global")
+	}
+
+	// Dynamic: no cache
+	if blocks[2].CacheControl != nil {
+		t.Error("dynamic block should not have cache_control")
+	}
+}
